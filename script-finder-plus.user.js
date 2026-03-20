@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name            Script Finder+ (Full Fixed Edition)
-// @name:zh-CN      Script Finder 油猴脚本查找 (全修复完美版)
+// @name            Script Finder+
+// @name:zh-CN      Script Finder 油猴脚本查找
 // @description:zh-CN 修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
 // @namespace       https://github.com/HHXXYY123/script-finder-plus
 // @version         2026.3.21.12
