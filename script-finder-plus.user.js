@@ -3,7 +3,7 @@
 // @name:zh-CN      Script Finder 油猴脚本查找
 // @description:zh-CN 修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
 // @namespace       https://github.com/HHXXYY123/script-finder-plus
-// @version         2026.3.21.12
+// @version         2026.3.21.15
 // @author          HHXXYY123
 // @match           *://*/*
 // @connect         greasyfork.org
@@ -17,14 +17,14 @@
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
     const userLang = (navigator.languages && navigator.languages[0]) || navigator.language || 'en'
     const isChinese = userLang.startsWith('zh')
-    
+
     const getT = (key) => {
         const dict = isChinese ? {
-            Author: '作者', Installs: '安装量', Loading: '加载中...', LoadMore: '加载更多', AllLoaded: '到底啦',
-            Search: '搜索脚本...', Scripts: '脚本查找', MiniBtn: '查找', Timeout: '超时'
+            Author: '作者', Installs: '总安装', Daily: '日安装', Created: '创建', Updated: '更新', Loading: '加载中...', LoadMore: '加载更多', AllLoaded: '到底啦',
+            Search: '搜索脚本...', Scripts: '脚本查找', MiniBtn: '查找', Timeout: '超时', Install: '安装'
         } : {
-            Author: 'Author', Installs: 'Installs', Loading: 'Loading...', LoadMore: 'More', AllLoaded: 'End',
-            Search: 'Search...', Scripts: 'Scripts', MiniBtn: 'Find', Timeout: 'Timeout'
+            Author: 'Author', Installs: 'Total', Daily: 'Daily', Created: 'Created', Updated: 'Updated', Loading: 'Loading...', LoadMore: 'More', AllLoaded: 'End',
+            Search: 'Search...', Scripts: 'Scripts', MiniBtn: 'Find', Timeout: 'Timeout', Install: 'Install'
         }
         return dict[key] || key
     }
@@ -64,9 +64,15 @@
                 const doc = new DOMParser().parseFromString(res.responseText, 'text/html')
                 const scripts = doc.querySelector('#browse-script-list')?.querySelectorAll('[data-script-id]')
                 if (page === 1) {
-                    const totalText = doc.querySelector('.sidebar-redesign p, #main-header p')?.innerText || ''
-                    const match = totalText.match(/(\d+)/)
-                    if (match) document.querySelector('.sf-total-count').innerText = ` (${match[0]})`
+                    const headerText = doc.querySelector('body')?.innerText || '';
+                    const match = headerText.match(/(?:共|of)\s*([\d,]+)\s*(?:个脚本|scripts|条)/i) || headerText.match(/(\d+)\s*(?:个脚本|scripts found)/i);
+                    if (match) {
+                        const count = match[1].replace(/,/g, '');
+                        document.querySelector('.sf-total-count').innerText = ` (共 ${count} 个)`;
+                    } else {
+                        // 备用方案：如果没匹配到具体总数文本，获取当前页的脚本数量
+                        document.querySelector('.sf-total-count').innerText = ` (本页 ${scripts ? scripts.length : 0} 个)`;
+                    }
                 }
                 if (!scripts || scripts.length === 0) {
                     if (page === 1) { hint.innerText = "该域暂无可用脚本"; hint.style.display = 'block' }
@@ -74,19 +80,31 @@
                 }
                 let staggerDelay = 100
                 scripts.forEach(s => {
+                    const typeBadge = s.querySelector('.script-type')?.textContent || '';
+                    const isLibrary = typeBadge.includes('Library') || typeBadge.includes('库');
+                    const extension = isLibrary ? '.js' : '.user.js';
+                    const nameEncoded = encodeURIComponent(s.getAttribute('data-script-name'));
+                    const installUrl = `https://update.greasyfork.org/scripts/${s.getAttribute('data-script-id')}/${nameEncoded}${extension}`;
+
                     const info = {
-                        id: s.getAttribute('data-script-id'), name: s.getAttribute('data-script-name'),
-                        author: s.querySelector('dd.script-list-author').textContent,
-                        desc: s.querySelector('.script-description').textContent,
+                        id: s.getAttribute('data-script-id'),
+                        name: s.getAttribute('data-script-name'),
+                        author: s.querySelector('dd.script-list-author')?.textContent || 'Unknown',
+                        desc: s.querySelector('.script-description')?.textContent || '',
                         version: s.getAttribute('data-script-version'),
                         url: 'https://greasyfork.org/scripts/' + s.getAttribute('data-script-id'),
-                        installs: s.getAttribute('data-script-total-installs'),
-                        rating: s.getAttribute('data-script-rating-score')
+                        installUrl: installUrl,
+                        installs: s.getAttribute('data-script-total-installs') || '0',
+                        daily: s.getAttribute('data-script-daily-installs') || '0',
+                        created: s.getAttribute('data-script-created-date') || '',
+                        updated: s.getAttribute('data-script-updated-date') || '',
+                        rating: s.getAttribute('data-script-rating-score') || '0',
+                        typeBadge: typeBadge
                     }
                     const li = appendItem(info)
                     queueTranslation(info.name, li.querySelector('.sf-trans-name'), staggerDelay)
                     queueTranslation(info.desc, li.querySelector('.sf-trans-desc'), staggerDelay + 50)
-                    staggerDelay += 150 
+                    staggerDelay += 150
                 })
                 const next = doc.querySelector('.next_page')
                 if (!next || next.classList.contains('disabled')) {
@@ -104,13 +122,25 @@
         const li = document.createElement('li')
         li.className = 'sf-info-item'; li.style = "border-bottom: 1px solid #eee; padding: 12px 0; list-style: none;"
         li.innerHTML = `
-            <div class="sf-item-card">
-                <a class="sf-name" href="${s.url}" target="_blank" style="font-size:16px; font-weight:bold; color:#1e90ff; text-decoration:none;">${s.name}</a>
-                <div class="sf-trans-name" style="display:none; font-size:13px; color:#d35400; background:#fff5eb; padding:3px 6px; border-radius:4px; margin:4px 0;"></div>
-                <p class="sf-desc" style="font-size:13px; color:#444; margin:6px 0; line-height:1.4;">${s.desc}</p>
-                <div class="sf-trans-desc" style="display:none; font-size:13px; color:#d35400; background:#fff5eb; padding:3px 6px; border-radius:4px; margin:4px 0;"></div>
-                <div style="display:flex; gap:10px; font-size:12px; color:#888;">
-                    <span>👤 ${s.author}</span><span>📥 ${s.installs}</span>
+            <div class="sf-item-card" style="position:relative;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; padding-right:90px;">
+                    <div>
+                        <a class="sf-name" href="${s.url}" target="_blank" style="font-size:17px; font-weight:bold; color:#1e90ff; text-decoration:none;" title="查看详情">${s.name}</a>
+                        <span style="font-size:13px; color:#999; margin-left:10px;">v${s.version}</span>
+                        ${s.typeBadge ? `<span style="font-size:12px; background:#e0e0e0; color:#555; padding:2px 6px; border-radius:4px; margin-left:8px;">${s.typeBadge}</span>` : ''}
+                    </div>
+                    <a href="${s.installUrl}" target="_blank" style="position:absolute; right:0; top:0; padding:6px 12px; background:#4CAF50; color:white; text-decoration:none; border-radius:4px; font-size:13px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1); transition:background 0.2s;" title="点击直接安装">${getT('Install')}</a>
+                </div>
+                <div class="sf-trans-name" style="display:none; font-size:14px; color:#d35400; background:#fff5eb; padding:3px 6px; border-radius:4px; margin:4px 0;"></div>
+                <p class="sf-desc" style="font-size:14px; color:#444; margin:6px 0; line-height:1.5;">${s.desc}</p>
+                <div class="sf-trans-desc" style="display:none; font-size:14px; color:#d35400; background:#fff5eb; padding:3px 6px; border-radius:4px; margin:4px 0;"></div>
+                <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:13px; color:#888; margin-top:8px;">
+                    <span>👤 ${getT('Author')}: <span style="color:#555">${s.author}</span></span>
+                    <span>📥 ${getT('Installs')}: <span style="color:#555">${s.installs}</span></span>
+                    <span>📈 ${getT('Daily')}: <span style="color:#555">${s.daily}</span></span>
+                    ${s.created ? `<span>📅 ${getT('Created')}: <span style="color:#555">${s.created}</span></span>` : ''}
+                    ${s.updated ? `<span>🔄 ${getT('Updated')}: <span style="color:#555">${s.updated}</span></span>` : ''}
+                    ${s.rating && s.rating !== '0' ? `<span>⭐ <span style="color:#f39c12">${s.rating}</span></span>` : ''}
                 </div>
             </div>`
         list.appendChild(li); return li
@@ -126,7 +156,7 @@
             }
             @media screen and (max-width: 768px) {
                 scrbutton.sf-main-btn {
-                    padding: 10px 6px; font-size: 13px; width: 28px; line-height: 1.2; 
+                    padding: 10px 6px; font-size: 13px; width: 28px; line-height: 1.2;
                     border-radius: 8px; right: 5px; text-align: center;
                     word-break: break-all; display: flex; align-items: center; justify-content: center;
                 }
@@ -153,13 +183,13 @@
 
         panel.className = 'sf-panel'; panel.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1e90ff; padding-bottom:8px;">
-                <div style="font-size:18px; font-weight:bold; color:#1e90ff;">Script Finder<span class="sf-total-count" style="font-size:12px; color:#999;"></span></div>
+                <div style="font-size:18px; font-weight:bold; color:#1e90ff;">Script Finder<span class="sf-total-count" style="font-size:13px; color:#999; margin-left:6px;"></span></div>
                 <button class="sf-close" style="border:none; background:none; cursor:pointer; font-size:24px; color:#999;">&times;</button>
             </div>
-            <input type="text" class="sf-search" placeholder="${getT('Search')}" style="width:100%; padding:10px; margin:10px 0; border:1px solid #ddd; border-radius:6px; font-size:14px; box-sizing:border-box;">
-            <div class="sf-wait-loading" style="text-align:center; padding:20px;">${getT('Loading')}</div>
+            <input type="text" class="sf-search" placeholder="${getT('Search')}" style="width:100%; padding:10px; margin:10px 0; border:1px solid #ddd; border-radius:6px; font-size:15px; box-sizing:border-box;">
+            <div class="sf-wait-loading" style="text-align:center; padding:20px; font-size:14px;">${getT('Loading')}</div>
             <ul class="sf-info-list" style="padding:0; margin:0;"></ul>
-            <button class="sf-load-more" style="display:none; width:100%; padding:10px; background:#1e90ff; color:#fff; border:none; border-radius:4px; margin-top:10px;">${getT('LoadMore')}</button>
+            <button class="sf-load-more" style="display:none; width:100%; padding:10px; background:#1e90ff; color:#fff; border:none; border-radius:4px; margin-top:10px; font-size:15px; cursor:pointer;">${getT('LoadMore')}</button>
         `
         document.body.appendChild(panel)
 
@@ -182,13 +212,13 @@
         button.addEventListener('mousedown', onStart); window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onEnd)
         button.addEventListener('touchstart', onStart, {passive:false}); window.addEventListener('touchmove', onMove, {passive:false}); window.addEventListener('touchend', onEnd)
 
-        const startTimer = (d = 2000) => { 
-            clearTimeout(hideTimer); hideTimer = setTimeout(() => { if (collapsed && !isDragging) { button.style.opacity = '0'; setTimeout(() => { if (button.style.opacity === '0') button.style.display = 'none' }, 400) } }, d) 
+        const startTimer = (d = 2000) => {
+            clearTimeout(hideTimer); hideTimer = setTimeout(() => { if (collapsed && !isDragging) { button.style.opacity = '0'; setTimeout(() => { if (button.style.opacity === '0') button.style.display = 'none' }, 400) } }, d)
         }
-        const showBtn = (d = 2000) => { 
+        const showBtn = (d = 2000) => {
             if (button.style.display !== 'flex') {
-                button.style.display = 'flex'; 
-                setTimeout(() => button.style.opacity = '0.9', 10); 
+                button.style.display = 'flex';
+                setTimeout(() => button.style.opacity = '0.9', 10);
             } else {
                 button.style.opacity = '0.9';
             }
@@ -217,7 +247,7 @@
             panel.querySelectorAll('.sf-info-item').forEach(li => li.style.display = li.innerText.toLowerCase().includes(v) ? 'block' : 'none')
         }
         panel.querySelector('.sf-load-more').onclick = () => { if (loadedPages !== 'max') getScriptsInfo(domain, loadedPages + 1) }
-        
+
         // 初始显示 2 秒
         showBtn(2000)
     }
