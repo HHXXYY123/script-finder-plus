@@ -1,16 +1,16 @@
 // ==UserScript==
-// @name            Script Finder+
-// @name:zh-CN        Script Finder 油猴脚本查找
-// @description:zh-CN 手机端按钮竖向显示“查找”，极致瘦身不遮挡。渲染优先、异步翻译、支持拖动与位置记录。
-// @namespace         https://github.com/HHXXYY123/script-finder-plus
-// @version           2026.3.21.6
-// @author            HHXXYY123
-// @match             *://*/*
-// @connect           greasyfork.org
-// @connect           translate.googleapis.com
-// @grant             GM_xmlhttpRequest
-// @grant             GM_addStyle
-// @license           MIT
+// @name            Script Finder+ (Full Fixed Edition)
+// @name:zh-CN      Script Finder 油猴脚本查找 (全修复完美版)
+// @description:zh-CN 修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
+// @namespace       https://github.com/HHXXYY123/script-finder-plus
+// @version         2026.3.21.7
+// @author          HHXXYY123
+// @match           *://*/*
+// @connect         greasyfork.org
+// @connect         translate.googleapis.com
+// @grant           GM_xmlhttpRequest
+// @grant           GM_addStyle
+// @license         MIT
 // ==/UserScript==
 
 (function () {
@@ -20,7 +20,7 @@
     
     const getT = (key) => {
         const dict = isChinese ? {
-            Author: '作者', Installs: '总安装量', Loading: '请求数据中...', LoadMore: '加载更多', AllLoaded: '到底啦',
+            Author: '作者', Installs: '安装量', Loading: '加载中...', LoadMore: '加载更多', AllLoaded: '到底啦',
             Search: '搜索脚本...', Scripts: '脚本查找', MiniBtn: '查找', Timeout: '超时'
         } : {
             Author: 'Author', Installs: 'Installs', Loading: 'Loading...', LoadMore: 'More', AllLoaded: 'End',
@@ -32,7 +32,6 @@
     const domain = window.location.hostname.split('.').slice(-2).join('.')
     let neverLoaded = true, collapsed = true, loadedPages = 0, hideTimer = null, isDragging = false
 
-    // --- 异步翻译逻辑 (不阻塞渲染) ---
     function queueTranslation(text, element, delay) {
         if (!text || /[\u4e00-\u9fa5]/.test(text)) return
         setTimeout(() => {
@@ -64,23 +63,19 @@
                 hint.style.display = 'none'
                 const doc = new DOMParser().parseFromString(res.responseText, 'text/html')
                 const scripts = doc.querySelector('#browse-script-list')?.querySelectorAll('[data-script-id]')
-                
                 if (page === 1) {
                     const totalText = doc.querySelector('.sidebar-redesign p, #main-header p')?.innerText || ''
                     const match = totalText.match(/(\d+)/)
                     if (match) document.querySelector('.sf-total-count').innerText = ` (${match[0]})`
                 }
-
                 if (!scripts || scripts.length === 0) {
                     if (page === 1) { hint.innerText = "该域暂无可用脚本"; hint.style.display = 'block' }
                     return
                 }
-
                 let staggerDelay = 100
                 scripts.forEach(s => {
                     const info = {
-                        id: s.getAttribute('data-script-id'),
-                        name: s.getAttribute('data-script-name'),
+                        id: s.getAttribute('data-script-id'), name: s.getAttribute('data-script-name'),
                         author: s.querySelector('dd.script-list-author').textContent,
                         desc: s.querySelector('.script-description').textContent,
                         version: s.getAttribute('data-script-version'),
@@ -93,7 +88,6 @@
                     queueTranslation(info.desc, li.querySelector('.sf-trans-desc'), staggerDelay + 50)
                     staggerDelay += 150 
                 })
-
                 const next = doc.querySelector('.next_page')
                 if (!next || next.classList.contains('disabled')) {
                     loadedPages = 'max'; btn.textContent = getT('AllLoaded'); btn.disabled = true
@@ -130,7 +124,6 @@
                 box-shadow: 0 4px 12px rgba(0,0,0,0.2); opacity: 0; display: none; transition: opacity 0.4s;
                 user-select: none; touch-action: none;
             }
-            /* 手机端极致瘦身竖版 */
             @media screen and (max-width: 768px) {
                 scrbutton.sf-main-btn {
                     padding: 10px 6px; font-size: 13px; width: 28px; line-height: 1.2; 
@@ -152,7 +145,6 @@
 
         const button = document.createElement('scrbutton'), panel = document.createElement('div')
         button.className = 'sf-main-btn'
-        // 手机显示竖版“查找”，桌面显示“脚本查找”
         button.innerText = isMobile ? getT('MiniBtn') : getT('Scripts')
         document.body.appendChild(button)
 
@@ -194,6 +186,11 @@
             clearTimeout(hideTimer); hideTimer = setTimeout(() => { if (collapsed && !isDragging) { button.style.opacity = '0'; setTimeout(() => { if (button.style.opacity === '0') button.style.display = 'none' }, 400) } }, d) 
         }
         const showBtn = (d = 2000) => { button.style.display = 'flex'; setTimeout(() => button.style.opacity = '0.9', 10); if (collapsed && !isDragging) startTimer(d) }
+
+        // --- 核心修复：鼠标靠右自动显示 ---
+        window.addEventListener('mousemove', (e) => {
+            if (collapsed && e.clientX > window.innerWidth - 50) showBtn(3000)
+        })
 
         window.addEventListener('scroll', () => { if (collapsed) showBtn() })
         document.addEventListener('mousedown', (e) => { if (!collapsed && !panel.contains(e.target) && !button.contains(e.target)) closePanel() })
