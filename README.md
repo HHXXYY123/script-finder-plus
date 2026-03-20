@@ -61,8 +61,8 @@
     <img src="https://img.shields.io/github/size/ChinaGodMan/UserScripts/script-finder-plus/script-finder-plus.user.js?color=%23990000">
     <img src="https://img.shields.io/greasyfork/dt/498904?logo=greasyfork&logoColor=white&labelColor=%23670000&color=blue&label=%E7%94%A8%E6%88%B7%E6%95%B0%E9%87%8F">
     <img src="https://img.shields.io/badge/dynamic/json?&label=%E6%AF%8F%E6%97%A5%E6%A3%80%E6%9F%A5%E6%9B%B4%E6%96%B0%E6%AC%A1%E6%95%B0&query=$.498904&logo=greasyfork&logoColor=white&labelColor=%23670000&color=blue&url=https://github.com/ChinaGodMan/UserScriptsHistory/raw/main/daily_update_checks.json">
-    <p>Download:<a href="https://github.com/ChinaGodMan/UserScripts/tree/main/script-finder-plus">Github</a> | ⭐<a
-            href="https://greasyfork.org/scripts/498904">Greasy
+    <p>Download:<a href="https://github.com/HHXXYY123/script-finder-plus/tree/main">Github</a> | ⭐<a
+            href="[https://greasyfork.org/zh-CN/scripts/570429-script-finder-stable-persistent]">Greasy
             Fork</a></p><details><summary style="color:#FFD700">更新记录</summary><div align="right"><a href="https://github.com/ChinaGodMan/UserScripts/tree/main/script-finder-plus/CHANGELOG.md"><img src="https://img.shields.io/badge/-GitHub-3A3A3A?style=flat&logo=GitHub&logoColor=white"></a></div><h1><strong>🛠️ Script Finder+ 更新日志</strong></h1>
 <h3><strong>📅 2025.5.22.1</strong></h3>
 <p><strong>修复</strong>: 修复在小尺寸屏幕上当点击了<code>脚本</code>按钮后,再点击其他页面位置时<code>脚本</code>按钮消失不见的问题  </p>
