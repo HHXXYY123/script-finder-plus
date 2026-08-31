@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name            Script Finder+
 // @name:zh-CN      Script Finder 油猴脚本查找
-// @description:zh-CN 加载状态移到标题栏，避免列表跳动；桌面端面板固定宽度，窗口较小时自适应。修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
+// @description:zh-CN 加载状态移到标题栏，避免列表跳动；增强英文脚本自动翻译的接口兼容性。桌面端面板固定宽度，窗口较小时自适应。修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
 // @namespace       https://github.com/HHXXYY123/script-finder-plus
-// @version         2026.9.1.0458
+// @version         2026.9.1.0518
 // @author          HHXXYY123
 // @match           *://*/*
 // @connect         greasyfork.org
 // @connect         translate.googleapis.com
+// @connect         clients5.google.com
 // @grant           GM_xmlhttpRequest
 // @grant           GM_addStyle
 // @license         MIT
@@ -41,24 +42,144 @@
     let neverLoaded = true, collapsed = true, loadedPages = 0, hideTimer = null, isDragging = false
     let isLoadingPage = false, pendingSearchTerm = '', searchLoadTimer = null, autoPreloadTimer = null, totalLoadedItems = 0
 
-    function queueTranslation(text, element, delay) {
-        if (!text || /[\u4e00-\u9fa5]/.test(text)) return
+    const translationCache = new Map()
+    const translationQueue = []
+    const translationPending = new Map()
+    let translationRunning = false
+    let lastTranslationStart = 0
+    const translationInterval = 650
+
+    function applyTranslation(element, translated) {
+        if (!element || !translated) return
+        element.style.display = 'block'
+        element.innerText = `🏮 ${translated}`
+    }
+
+    function parseGoogleSingle(body) {
+        const data = JSON.parse(body)
+        return Array.isArray(data?.[0])
+            ? data[0].map(part => part?.[0] || '').join('').trim()
+            : ''
+    }
+
+    function parseGoogleCompact(body) {
+        const data = JSON.parse(body)
+        return Array.isArray(data?.[0]) ? String(data[0][0] || '').trim() : ''
+    }
+
+    function requestTextByGM(url) {
+        return new Promise((resolve, reject) => {
+            let settled = false
+            const finish = (handler, value) => {
+                if (settled) return
+                settled = true
+                handler(value)
+            }
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: 8000,
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300) finish(resolve, res.responseText)
+                        else finish(reject, new Error(`HTTP ${res.status}`))
+                    },
+                    onerror: () => finish(reject, new Error('request failed')),
+                    ontimeout: () => finish(reject, new Error('request timeout'))
+                })
+            } catch (e) {
+                finish(reject, e)
+            }
+        })
+    }
+
+    function requestTextByFetch(url) {
+        return fetch(url, { credentials: 'omit' }).then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return res.text()
+        })
+    }
+
+    function requestTranslation(text, done) {
+        const encoded = encodeURIComponent(text)
+        const endpoints = [
+            {
+                url: `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encoded}`,
+                parse: parseGoogleSingle
+            },
+            {
+                url: `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=zh-CN&q=${encoded}`,
+                parse: parseGoogleCompact
+            }
+        ]
+
+        const tryRequest = (transportIndex, endpointIndex) => {
+            if (endpointIndex >= endpoints.length) {
+                if (transportIndex === 0) return tryRequest(1, 0)
+                done('')
+                return
+            }
+            const endpoint = endpoints[endpointIndex]
+            const request = transportIndex === 0 ? requestTextByGM(endpoint.url) : requestTextByFetch(endpoint.url)
+            request.then(body => {
+                try {
+                    const translated = endpoint.parse(body)
+                    if (translated) {
+                        done(translated)
+                        return
+                    }
+                } catch (e) {}
+                tryRequest(transportIndex, endpointIndex + 1)
+            }).catch(() => tryRequest(transportIndex, endpointIndex + 1))
+        }
+        tryRequest(0, 0)
+    }
+
+    function processTranslationQueue() {
+        if (translationRunning || translationQueue.length === 0) return
+        const text = translationQueue.shift()
+        const elements = translationPending.get(text) || []
+        const cached = translationCache.get(text)
+        if (cached) {
+            elements.forEach(element => applyTranslation(element, cached))
+            translationPending.delete(text)
+            processTranslationQueue()
+            return
+        }
+
+        const wait = Math.max(0, translationInterval - (Date.now() - lastTranslationStart))
         setTimeout(() => {
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`,
-                timeout: 8000,
-                onload: (res) => {
-                    try {
-                        const data = JSON.parse(res.responseText)
-                        const translated = data[0].map(x => x[0]).join('')
-                        if (translated && element) {
-                            element.style.display = 'block'
-                            element.innerText = `🏮 ${translated}`
-                        }
-                    } catch (e) {}
+            translationRunning = true
+            lastTranslationStart = Date.now()
+            requestTranslation(text, translated => {
+                if (translated) {
+                    translationCache.set(text, translated)
+                    elements.forEach(element => applyTranslation(element, translated))
                 }
+                translationPending.delete(text)
+                translationRunning = false
+                processTranslationQueue()
             })
+        }, wait)
+    }
+
+    function queueTranslation(text, element, delay) {
+        const normalized = (text || '').trim()
+        if (!normalized || /[\u4e00-\u9fa5]/.test(normalized) || !element) return
+        setTimeout(() => {
+            const cached = translationCache.get(normalized)
+            if (cached) {
+                applyTranslation(element, cached)
+                return
+            }
+            const pending = translationPending.get(normalized)
+            if (pending) {
+                pending.push(element)
+                return
+            }
+            translationPending.set(normalized, [element])
+            translationQueue.push(normalized)
+            processTranslationQueue()
         }, delay)
     }
 
