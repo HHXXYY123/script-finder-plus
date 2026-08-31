@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name            Script Finder+
 // @name:zh-CN      Script Finder 油猴脚本查找
-// @description:zh-CN 加载状态移到标题栏，避免列表跳动。修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
+// @description:zh-CN 加载状态移到标题栏，避免列表跳动；桌面端面板固定宽度，窗口较小时自适应。修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
 // @namespace       https://github.com/HHXXYY123/script-finder-plus
-// @version         2026.9.1.0427
+// @version         2026.9.1.0458
 // @author          HHXXYY123
 // @match           *://*/*
 // @connect         greasyfork.org
@@ -258,7 +258,8 @@
             }
             div.sf-panel {
                 display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                width: 95%; max-width: 650px; background: #fff; border-radius: 12px; z-index: 1000000;
+                width: 650px !important; max-width: calc(100vw - 30px) !important; box-sizing: border-box;
+                background: #fff; border-radius: 12px; z-index: 1000000;
                 box-shadow: 0 10px 40px rgba(0,0,0,0.4); padding: 15px; max-height: 80vh; overflow-y: auto;
             }
             .sf-sticky-head {
