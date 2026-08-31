@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name            Script Finder+
 // @name:zh-CN      Script Finder 油猴脚本查找
-// @description:zh-CN 修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
+// @description:zh-CN 加载状态移到标题栏，避免列表跳动。修复桌面端靠右显示逻辑。手机竖版“查找”不遮挡。渲染优先、异步翻译、支持拖动、位置记录。
 // @namespace       https://github.com/HHXXYY123/script-finder-plus
-// @version         2026.3.21.15
+// @version         2026.9.1.0427
 // @author          HHXXYY123
 // @match           *://*/*
 // @connect         greasyfork.org
@@ -21,16 +21,25 @@
     const getT = (key) => {
         const dict = isChinese ? {
             Author: '作者', Installs: '总安装', Daily: '日安装', Created: '创建', Updated: '更新', Loading: '加载中...', LoadMore: '加载更多', AllLoaded: '到底啦',
-            Search: '搜索脚本...', Scripts: '脚本查找', MiniBtn: '查找', Timeout: '超时', Install: '安装'
+            Search: '搜索脚本...', Scripts: '脚本查找', MiniBtn: '查找', Timeout: '超时', Install: '安装', OpenGF: '打开 GreasyFork'
         } : {
             Author: 'Author', Installs: 'Total', Daily: 'Daily', Created: 'Created', Updated: 'Updated', Loading: 'Loading...', LoadMore: 'More', AllLoaded: 'End',
-            Search: 'Search...', Scripts: 'Scripts', MiniBtn: 'Find', Timeout: 'Timeout', Install: 'Install'
+            Search: 'Search...', Scripts: 'Scripts', MiniBtn: 'Find', Timeout: 'Timeout', Install: 'Install', OpenGF: 'Open GreasyFork'
         }
         return dict[key] || key
     }
 
+    function setLoadingStatus(text = '', visible = true) {
+        const status = document.querySelector('.sf-loading-status')
+        if (!status) return
+        status.textContent = text || ''
+        status.classList.toggle('is-visible', visible && Boolean(text))
+        status.setAttribute('aria-busy', visible ? 'true' : 'false')
+    }
+
     const domain = window.location.hostname.split('.').slice(-2).join('.')
     let neverLoaded = true, collapsed = true, loadedPages = 0, hideTimer = null, isDragging = false
+    let isLoadingPage = false, pendingSearchTerm = '', searchLoadTimer = null, autoPreloadTimer = null, totalLoadedItems = 0
 
     function queueTranslation(text, element, delay) {
         if (!text || /[\u4e00-\u9fa5]/.test(text)) return
@@ -53,14 +62,19 @@
         }, delay)
     }
 
-    function getScriptsInfo(domain, page = 1) {
-        const btn = document.querySelector('.sf-load-more'), hint = document.querySelector('.sf-wait-loading')
+    function getScriptsInfo(domain, page = 1, options = {}) {
+        const btn = document.querySelector('.sf-load-more')
+        const { silent = false, onComplete = null } = options
+        if (isLoadingPage) return
+        isLoadingPage = true
+        if (!silent) setLoadingStatus(`${getT('Loading')} (${page})`, true)
         GM_xmlhttpRequest({
             method: 'GET',
             url: `https://greasyfork.org/scripts/by-site/${domain}?filter_locale=0&sort=updated&page=${page}`,
             timeout: 10000,
             onload: (res) => {
-                hint.style.display = 'none'
+                isLoadingPage = false
+                if (!silent) setLoadingStatus('', false)
                 const doc = new DOMParser().parseFromString(res.responseText, 'text/html')
                 const scripts = doc.querySelector('#browse-script-list')?.querySelectorAll('[data-script-id]')
                 if (page === 1) {
@@ -68,16 +82,21 @@
                     const match = headerText.match(/(?:共|of)\s*([\d,]+)\s*(?:个脚本|scripts|条)/i) || headerText.match(/(\d+)\s*(?:个脚本|scripts found)/i);
                     if (match) {
                         const count = match[1].replace(/,/g, '');
-                        document.querySelector('.sf-total-count').innerText = ` (共 ${count} 个)`;
+                        document.querySelector('.sf-total-count').innerText = ` (共 ${count} 个，已加载 ${totalLoadedItems || scripts.length} 个)`;
                     } else {
                         // 备用方案：如果没匹配到具体总数文本，获取当前页的脚本数量
-                        document.querySelector('.sf-total-count').innerText = ` (本页 ${scripts ? scripts.length : 0} 个)`;
+                        document.querySelector('.sf-total-count').innerText = ` (已加载 ${totalLoadedItems || (scripts ? scripts.length : 0)} 个)`;
                     }
                 }
                 if (!scripts || scripts.length === 0) {
-                    if (page === 1) { hint.innerText = "该域暂无可用脚本"; hint.style.display = 'block' }
+                    if (page === 1 && !silent) setLoadingStatus('该域暂无可用脚本', true)
+                    if (page > 1) { loadedPages = 'max'; btn.textContent = getT('AllLoaded'); btn.disabled = true }
+                    if (typeof onComplete === 'function') onComplete([])
                     return
                 }
+                totalLoadedItems += scripts.length
+                const totalCountNode = document.querySelector('.sf-total-count')
+                if (totalCountNode && !totalCountNode.innerText.includes('共 ')) totalCountNode.innerText = ` (已加载 ${totalLoadedItems} 个)`
                 let staggerDelay = 100
                 scripts.forEach(s => {
                     const typeBadge = s.querySelector('.script-type')?.textContent || '';
@@ -106,15 +125,91 @@
                     queueTranslation(info.desc, li.querySelector('.sf-trans-desc'), staggerDelay + 50)
                     staggerDelay += 150
                 })
-                const next = doc.querySelector('.next_page')
-                if (!next || next.classList.contains('disabled')) {
+                const pageCount = scripts.length
+                if (pageCount < 100) {
                     loadedPages = 'max'; btn.textContent = getT('AllLoaded'); btn.disabled = true
                 } else {
-                    loadedPages = page; btn.style.display = 'block'; btn.textContent = getT('LoadMore')
+                    loadedPages = page; btn.style.display = 'block'; btn.textContent = getT('LoadMore'); btn.disabled = false
                 }
+                if (typeof onComplete === 'function') onComplete(Array.from(scripts))
             },
-            ontimeout: () => { hint.innerText = getT('Timeout'); hint.style.display = 'block' }
+            ontimeout: () => {
+                isLoadingPage = false
+                setLoadingStatus('', false)
+                if (!silent) setLoadingStatus(getT('Timeout'), true)
+                if (typeof onComplete === 'function') onComplete([])
+            }
         })
+    }
+
+    function updateSearchResults(term) {
+        const normalized = (term || '').trim().toLowerCase()
+        const items = Array.from(document.querySelectorAll('.sf-info-item'))
+        let visibleCount = 0
+        items.forEach(li => {
+            const matched = !normalized || li.innerText.toLowerCase().includes(normalized)
+            li.style.display = matched ? 'block' : 'none'
+            if (matched) visibleCount++
+        })
+        return visibleCount
+    }
+
+    function maybeLoadMoreForSearch() {
+        const term = pendingSearchTerm
+        if (!term || isLoadingPage || loadedPages === 'max') return
+        const visibleCount = updateSearchResults(term)
+        if (visibleCount > 0) return
+        const nextPage = typeof loadedPages === 'number' ? loadedPages + 1 : 1
+        setLoadingStatus(`${getT('Loading')} (${nextPage})`, true)
+        getScriptsInfo(domain, nextPage, {
+            silent: true,
+            onComplete: () => {
+                const matchedCount = updateSearchResults(term)
+                if (matchedCount === 0 && loadedPages !== 'max') {
+                    searchLoadTimer = setTimeout(maybeLoadMoreForSearch, 150)
+                } else {
+                    setLoadingStatus('', false)
+                }
+            }
+        })
+    }
+
+    function scheduleAutoPreload(delay = 180) {
+        if (autoPreloadTimer) clearTimeout(autoPreloadTimer)
+        if (collapsed || isLoadingPage || loadedPages === 'max' || pendingSearchTerm) return
+        autoPreloadTimer = setTimeout(() => loadNextPage('auto'), delay)
+    }
+
+    function loadNextPage(reason = 'manual') {
+        if (isLoadingPage || loadedPages === 'max') return
+        const nextPage = typeof loadedPages === 'number' ? loadedPages + 1 : 1
+        setLoadingStatus(`${getT('Loading')} (${nextPage})`, true)
+        getScriptsInfo(domain, nextPage, {
+            silent: true,
+            onComplete: () => {
+                if (pendingSearchTerm) {
+                    const matchedCount = updateSearchResults(pendingSearchTerm)
+                    if (reason === 'search' && matchedCount === 0 && loadedPages !== 'max') {
+                        searchLoadTimer = setTimeout(() => loadNextPage('search'), 120)
+                        return
+                    }
+                }
+                setLoadingStatus('', false)
+                if ((reason === 'auto' || reason === 'open') && loadedPages !== 'max') {
+                    scheduleAutoPreload(180)
+                }
+            }
+        })
+    }
+
+    function maybeLoadMoreOnScroll() {
+        if (isLoadingPage || loadedPages === 'max') return
+        const panel = document.querySelector('.sf-panel')
+        if (!panel || panel.style.display !== 'block') return
+        const remaining = panel.scrollHeight - panel.scrollTop - panel.clientHeight
+        if (remaining <= 160) {
+            loadNextPage('scroll')
+        }
     }
 
     function appendItem(s) {
@@ -166,11 +261,20 @@
                 width: 95%; max-width: 650px; background: #fff; border-radius: 12px; z-index: 1000000;
                 box-shadow: 0 10px 40px rgba(0,0,0,0.4); padding: 15px; max-height: 80vh; overflow-y: auto;
             }
+            .sf-sticky-head {
+                position: sticky; top: -15px; z-index: 3; background: inherit; padding-top: 15px;
+            }
             @media (prefers-color-scheme: dark) {
                 div.sf-panel { background: #222; color: #ddd; }
                 .sf-desc { color: #bbb !important; }
                 .sf-trans-name, .sf-trans-desc { background: #3a2a1a !important; color: #ff9900 !important; }
             }
+            .sf-loading-status {
+                display: inline-block; width: 104px; overflow: hidden; text-overflow: ellipsis;
+                font-size: 12px; font-weight: normal; color: #999; white-space: nowrap;
+                vertical-align: middle; visibility: hidden;
+            }
+            .sf-loading-status.is-visible { visibility: visible; }
         `)
 
         const button = document.createElement('scrbutton'), panel = document.createElement('div')
@@ -182,14 +286,19 @@
         button.style.top = savedPos ? savedPos + 'px' : '70%'
 
         panel.className = 'sf-panel'; panel.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1e90ff; padding-bottom:8px;">
-                <div style="font-size:18px; font-weight:bold; color:#1e90ff;">Script Finder<span class="sf-total-count" style="font-size:13px; color:#999; margin-left:6px;"></span></div>
-                <button class="sf-close" style="border:none; background:none; cursor:pointer; font-size:24px; color:#999;">&times;</button>
+            <div class="sf-sticky-head">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1e90ff; padding-bottom:8px; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <div style="font-size:18px; font-weight:bold; color:#1e90ff;">Script Finder<span class="sf-total-count" style="font-size:13px; color:#999; margin-left:6px;"></span><span class="sf-loading-status" role="status" aria-live="polite" aria-busy="false"></span></div>
+                        <a class="sf-open-gf" href="https://greasyfork.org/scripts/by-site/${domain}?filter_locale=0&sort=updated" target="_blank" style="font-size:12px; color:#1e90ff; text-decoration:none; border:1px solid #1e90ff; border-radius:999px; padding:4px 8px;">${getT('OpenGF')}</a>
+                    </div>
+                    <button class="sf-close" style="border:none; background:none; cursor:pointer; font-size:24px; color:#999;">&times;</button>
+                </div>
+                <input type="text" class="sf-search" placeholder="${getT('Search')}" style="width:100%; padding:10px; margin:10px 0; border:1px solid #ddd; border-radius:6px; font-size:15px; box-sizing:border-box;">
             </div>
-            <input type="text" class="sf-search" placeholder="${getT('Search')}" style="width:100%; padding:10px; margin:10px 0; border:1px solid #ddd; border-radius:6px; font-size:15px; box-sizing:border-box;">
-            <div class="sf-wait-loading" style="text-align:center; padding:20px; font-size:14px;">${getT('Loading')}</div>
             <ul class="sf-info-list" style="padding:0; margin:0;"></ul>
-            <button class="sf-load-more" style="display:none; width:100%; padding:10px; background:#1e90ff; color:#fff; border:none; border-radius:4px; margin-top:10px; font-size:15px; cursor:pointer;">${getT('LoadMore')}</button>
+            <div class="sf-auto-more-sentinel" style="height:2px; width:100%;"></div>
+            <button class="sf-load-more" style="display:block; width:100%; padding:10px; background:#1e90ff; color:#fff; border:none; border-radius:4px; margin-top:10px; font-size:15px; cursor:pointer;">${getT('LoadMore')}</button>
         `
         document.body.appendChild(panel)
 
@@ -235,18 +344,39 @@
         window.addEventListener('scroll', () => { if (collapsed) showBtn(2000) })
         document.addEventListener('mousedown', (e) => { if (!collapsed && !panel.contains(e.target) && !button.contains(e.target)) closePanel() })
 
-        const closePanel = () => { panel.style.display = 'none'; collapsed = true; startTimer() }
+        const closePanel = () => { if (autoPreloadTimer) clearTimeout(autoPreloadTimer); panel.style.display = 'none'; collapsed = true; startTimer() }
         button.onclick = () => {
             if (moveDist > 5) return
-            if (collapsed) { panel.style.display = 'block'; if (neverLoaded) { getScriptsInfo(domain); neverLoaded = false }; collapsed = false; clearTimeout(hideTimer) }
+            if (collapsed) {
+                panel.style.display = 'block'
+                collapsed = false
+                clearTimeout(hideTimer)
+                if (neverLoaded) {
+                    getScriptsInfo(domain, 1, { onComplete: () => loadNextPage('open') })
+                    neverLoaded = false
+                } else {
+                    scheduleAutoPreload(120)
+                }
+            }
             else closePanel()
         }
         panel.querySelector('.sf-close').onclick = closePanel
         panel.querySelector('.sf-search').oninput = (e) => {
-            const v = e.target.value.toLowerCase()
-            panel.querySelectorAll('.sf-info-item').forEach(li => li.style.display = li.innerText.toLowerCase().includes(v) ? 'block' : 'none')
+            pendingSearchTerm = e.target.value.trim().toLowerCase()
+            if (searchLoadTimer) clearTimeout(searchLoadTimer)
+            const visibleCount = updateSearchResults(pendingSearchTerm)
+            if (!pendingSearchTerm) {
+                setLoadingStatus('', false)
+                return
+            }
+            if (visibleCount === 0 && loadedPages !== 'max') {
+                searchLoadTimer = setTimeout(() => loadNextPage('search'), 120)
+            }
         }
-        panel.querySelector('.sf-load-more').onclick = () => { if (loadedPages !== 'max') getScriptsInfo(domain, loadedPages + 1) }
+        panel.querySelector('.sf-load-more').onclick = () => { if (loadedPages !== 'max' && !isLoadingPage) loadNextPage('manual') }
+        panel.addEventListener('scroll', maybeLoadMoreOnScroll, { passive: true })
+        panel.addEventListener('wheel', () => setTimeout(maybeLoadMoreOnScroll, 0), { passive: true })
+        panel.addEventListener('touchend', () => setTimeout(maybeLoadMoreOnScroll, 0), { passive: true })
 
         // 初始显示 2 秒
         showBtn(2000)
